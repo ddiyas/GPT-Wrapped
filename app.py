@@ -18,6 +18,11 @@ try:
 except LookupError:
     nltk.download("averaged_perceptron_tagger")
 
+try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    nltk.download("punkt_tab")
+
 st.set_page_config(page_title="GPT Wrapped", page_icon="✨", layout="wide")
 
 st.title("GPT Wrapped 💫")
