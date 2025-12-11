@@ -2,74 +2,33 @@ import streamlit as st
 import pandas as pd
 from data_parser import *
 from analysis import *
+from database import *
 import json
 import matplotlib.pyplot as plt
+import nltk
+import hashlib
+
+try:
+    nltk.data.find("tokenizers/punkt")
+except LookupError:
+    nltk.download("punkt")
+
+try:
+    nltk.data.find("taggers/averaged_perceptron_tagger")
+except LookupError:
+    nltk.download("averaged_perceptron_tagger")
 
 st.set_page_config(page_title="GPT Wrapped", page_icon="✨", layout="wide")
 
-st.markdown(
-    """
-    <style>
-    :root {
-        --accent: #7c3aed;
-        --accent-2: #22d3ee;
-        --card: #0f172a;
-        --card-alt: #111827;
-        --text: #e5e7eb;
-    }
-    .hero {
-        padding: 24px 28px;
-        border-radius: 18px;
-        background: radial-gradient(circle at 10% 20%, rgba(124,58,237,0.25), transparent 35%),
-                    radial-gradient(circle at 80% 0%, rgba(34,211,238,0.25), transparent 32%),
-                    #0b1224;
-        border: 1px solid rgba(255,255,255,0.08);
-        color: var(--text);
-        margin-bottom: 12px;
-    }
-    .hero h1 { margin: 0; font-size: 2.4rem; font-weight: 800; }
-    .hero p { margin-top: 8px; color: #cbd5e1; font-size: 1rem; }
-    .card-row { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 12px; }
-    .stat-card {
-        background: var(--card);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 14px;
-        padding: 14px 16px;
-        color: var(--text);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    }
-    .stat-label { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.75rem; color: #94a3b8; }
-    .stat-value { font-size: 1.6rem; font-weight: 700; color: var(--text); margin-top: 6px; }
-    .pill {
-        display: inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: linear-gradient(120deg, var(--accent), var(--accent-2));
-        color: #0b1224;
-        font-weight: 700;
-        font-size: 0.85rem;
-        margin-left: 8px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.title("GPT Wrapped 💫")
 
 st.markdown(
-    """
-    <div class="hero">
-        <h1>GPT Wrapped</h1>
-        <p>Upload your ChatGPT export to see how your year looked in conversations.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    """Upload your ChatGPT export to see how your year looked in conversations.
 
-st.markdown(
-    """**How to export**
-    \n 1) Profile > Settings > Data Controls > Export Data
-    \n 2) Download the zip from the email
-    \n 3) Unzip and upload `conversations.json`
+**How to export:**
+1. Profile → Settings → Data Controls → Export Data
+2. Download the zip from the email
+3. Unzip and upload `conversations.json`
     """
 )
 
@@ -79,6 +38,9 @@ uploaded = st.file_uploader("Upload your `conversations.json` file", type=["json
 
 if uploaded:
     data = json.load(uploaded)
+
+    # Generate unique hash for this user based on their data
+    file_hash = get_file_hash(data)
 
     all_messages = []
     for conv in data:
@@ -95,39 +57,84 @@ if uploaded:
     user_messages = [m for m in all_messages if m["author"] == "user"]
     assistant_messages = [m for m in all_messages if m["author"] == "assistant"]
 
+    st.divider()
+
     display_name = name.strip() if name.strip() else "Your"
-    st.markdown(f"### ✨ {display_name} 2025 ChatGPT Wrapped")
+    st.header(f"{display_name}'s 2025 ChatGPT Wrapped")
 
     user_word_count = count_words_in_messages(user_messages)
 
-    st.markdown("<div class='card-row'>", unsafe_allow_html=True)
     st.markdown(
-        f"<div class='stat-card'><div class='stat-label'>Words you sent</div><div class='stat-value'>{user_word_count:,}</div></div>",
-        unsafe_allow_html=True,
+        f"### You sent **{user_word_count:,} words** this year — that's about **{user_word_count / 70000:.2f} books** worth."
     )
-    st.markdown(
-        f"You sent **{user_word_count:,} words** to ChatGPT this year that's about **{user_word_count / 70000:.2f} books** worth. Author much?"
-    )
-    st.markdown(
-        f"<div class='stat-card'><div class='stat-label'>Total conversations</div><div class='stat-value'>{total_convos}</div></div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"<div class='stat-card'><div class='stat-label'>Total messages</div><div class='stat-value'>{total_messages}</div></div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"<div class='stat-card'><div class='stat-label'>Messages you sent</div><div class='stat-value'>{len(user_messages)}</div></div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    # st.subheader("Your word cloud")
-    # wordcloud = generate_word_cloud(user_messages)
-    # if wordcloud:
-    #     fig, ax = plt.subplots(figsize=(10, 5))
-    #     ax.imshow(wordcloud, interpolation="bilinear")
-    #     ax.axis("off")
-    #     st.pyplot(fig)
-    # else:
-    #     st.write("Uh oh, something went wrong generating your word cloud.")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Words sent", f"{user_word_count:,}")
+    col2.metric("Total conversations", total_convos)
+    col3.metric("Total messages", total_messages)
+    col4.metric("Messages sent", len(user_messages))
+
+    st.subheader("Your Monthly Activity")
+
+    monthly_df = get_conversations_by_month(all_messages)
+    if not monthly_df.empty:
+        st.bar_chart(monthly_df.set_index("Month")["Messages"])
+
+    longest_title, longest_count = get_longest_conversation(data)
+    if longest_title and longest_count > 0:
+        st.markdown(
+            f"**Longest conversation:** *{longest_title}* ({longest_count} messages)"
+        )
+
+    st.subheader("📚 Your Conversation Topics")
+
+    with st.spinner("Discovering your conversation topics..."):
+        topics, _ = extract_conversation_topics(all_messages, top_n=5)
+
+    if topics:
+        st.write("Here's what you mostly talked about:")
+        topics_df = pd.DataFrame(topics)
+        for _, row in topics_df.iterrows():
+            st.markdown(
+                f"- **{row['topic']}** — {row['count']} conversations ({row['percentage']:.1f}%)"
+            )
+    else:
+        st.write("Not enough conversations to extract topics (need at least 10).")
+
+    # Auto-save stats and show comparison (cached so it only runs once per file hash)
+    @st.cache_data(hash_funcs={type(file_hash): lambda x: x})
+    def save_and_compare(file_hash, total_words, total_convos, total_messages):
+        save_user_stats(file_hash, total_words, total_convos, total_messages)
+
+        words_percentile = get_percentile(file_hash, "total_words")
+        convos_percentile = get_percentile(file_hash, "total_conversations")
+        messages_percentile = get_percentile(file_hash, "total_messages")
+        stats_summary = get_stats_summary()
+
+        return {
+            "words_percentile": words_percentile,
+            "convos_percentile": convos_percentile,
+            "messages_percentile": messages_percentile,
+            "stats_summary": stats_summary,
+        }
+
+    comparison = save_and_compare(
+        file_hash, user_word_count, total_convos, total_messages
+    )
+
+    st.divider()
+    st.subheader("How You Stack Up")
+
+    st.write(
+        f"You're in the **top {100 - comparison['words_percentile']:.0f}%** for words sent (avg: {comparison['stats_summary']['avg_words']:,.0f} words)"
+    )
+    st.write(
+        f"You're in the **top {100 - comparison['convos_percentile']:.0f}%** for conversations (avg: {comparison['stats_summary']['avg_conversations']:.0f} convos)"
+    )
+    st.write(
+        f"You're in the **top {100 - comparison['messages_percentile']:.0f}%** for total messages (avg: {comparison['stats_summary']['avg_messages']:.0f} messages)"
+    )
+
+    if comparison["words_percentile"] >= 90:
+        st.balloons()
+        st.write("**You're a ChatGPT power user!**")
